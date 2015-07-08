@@ -1,0 +1,82 @@
+#! /usr/bin/env python
+
+"""
+A simple command line utility for running a command on a remote windows host
+
+ex:    ./remote_cmd hosts.ini ipconfig /all
+
+for more option run ./remote_cmd -h
+
+the first argument may either be the address of the host (without port number or https:// etc)
+or it may be an INI config file holding configuration values for the host valid values are:
+    host (required) - the address of the host without port number or http:// etc
+    port - the port used to connect to winrm
+    scheme - the scheme used to connect to winrm currently only http and https are supported
+    transport - the transport used to connect ot winrm currently only plaintext and ssl are supported
+    username - the username used to connect to winrm
+    password - the password used to connect to winrm
+the file may contain multiple hosts separated in different sections
+"""
+
+from win_host import WinHost
+import argparse
+import os
+import ConfigParser
+import sys
+
+def main():
+    """
+    Parse command line arguments and execute a command on the specified hosts
+    """
+    parser = argparse.ArgumentParser(description='Run commands through winrm')
+    parser.add_argument('host', metavar='ADDRESS', 
+            help='host address, or host information file')
+    parser.add_argument('command', metavar='COMMAND', 
+            help='Command to be executed on the host')
+    parser.add_argument('args', metavar='ARGS', nargs='*',
+            default=[], help='arguments for the command')
+    parser.add_argument('-u', '--user', '--username', metavar='USERNAME', 
+            dest="username", help='The host username')
+    parser.add_argument('-p', '--pass', '--password', metavar='PASSWORD', 
+            dest="password", help='The host password')
+    parser.add_argument('-s', '--scheme', metavar='SCHEME', default='https',
+            dest="scheme", help='The connection scheme (http|https)')
+    parser.add_argument('--port', metavar='PORT', type=int, default=5986,
+            dest="port", help='The host winrm port')
+    parser.add_argument('-t', '--trans', '--transport', metavar='TRANSPORT', 
+            dest="transport", default='plaintext', 
+            help='The transport method, (plaintext|ssl)')
+    args = parser.parse_args()
+    hosts = parse_connection(args)
+    for conn in hosts:
+        print("EXEC %s %s on %s" % (args.command, ' '.join(args.args), conn.endpoint))
+        stdout, stderr, code = conn.run_local(args.command, args.args)
+        sys.stderr.write(stderr)
+        sys.stdout.write(stdout)
+        print("Exit code: %d" % code)
+
+def parse_connection(args):
+    """
+    Create a WinHost from the given args. If a file was passed as the host arg, read 
+    the config and use those values to create the WinHost
+
+    params:
+        args - a collection of command line args
+    returns:
+        a list of WinHost objects corresponding to the arg values
+    """
+    if (os.path.exists(args.host)):
+        cfg = ConfigParser.ConfigParser()
+        cfg.read(args.host)
+        hosts = []
+        arg_vars = vars(args)
+        del arg_vars['host']
+        for section in cfg.sections():
+            sec_dict = {k:v for k,v in cfg.items(section)}
+            hosts.append(WinHost.from_dict(arg_vars, sec_dict))
+        return hosts
+    else:
+        return [WinHost.from_dict(vars(args))]
+
+if __name__ == '__main__':
+    main()
